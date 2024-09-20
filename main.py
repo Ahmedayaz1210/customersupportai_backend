@@ -1,88 +1,56 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import google.generativeai as genai
-from fastapi.middleware.cors import CORSMiddleware
-import os
-from dotenv import load_dotenv
+"""
+doc_embedding.py
 
-from ml_utils.rag import RAG
+This module provides functions to embed documents using the Hugging Face embedding model (all-MiniLM-L6-v2).
+The embeddings can be used for tasks such as reranking documents after query search and retrieval.
+For reranking, the Jina model (jina-reranker-v1-turbo-en) from Hugging Face is used.
 
-# Load environment variables
-load_dotenv()
-
-# Get the API key from the environment variable
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Ensure the API key is set
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is not set")
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Add your Next.js app's URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-
-# vector store path
-vector_store_dir = "db"
-os.makedirs(vector_store_dir, exist_ok=True)
-
-vector_store_file = os.path.join(vector_store_dir, "chroma.db") # "chroma.db"
-# if os.path.exists(vector_store_file) : shutil.rmtree(vector_store_file) 
-from ml_utils.rag import RAG
-
-rag = RAG(vector_store_file, "headstarter_policy")
-
-rag.add_url("https://headstarter.co/privacy-policy")
-rag.add_url("https://headstarter.co/info")
-
-
-# Configure Gemini API (replace with your actual API key)
-genai.configure(api_key=GEMINI_API_KEY)
-
-# System instructions
-SYSTEM_INSTRUCTIONS = """
-You are Headstarter's Tech Support Bot, a knowledgeable assistant for Headstarter AI's community of emerging software engineers. Your role is to help users with technical issues, provide information about Headstarter's programs, and offer guidance on career development in software engineering. Give clear, concise, and friendly responses. If you can't resolve an issue, direct the user to human support. If the user doesn't input anything, politely ask if they still need assistance. Don't add any emojis. Let's get started!
+References:
+- Embedding Model: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+- Reranking Model: https://huggingface.co/jinaai/jina-reranker-v1-turbo-en
 """
 
-# Create a model instance
-model = genai.GenerativeModel('gemini-1.5-flash')
+from sentence_transformers import SentenceTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
 
-class ChatRequest(BaseModel):
-    message: str
+def get_embeddings(texts, model="all-MiniLM-L6-v2"):
+    """
+    Generates embeddings for a list of texts using the specified Hugging Face model.
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    try:
-        chat = model.start_chat(history=[])
+    Args:
+        texts (list of str): A list of texts to be embedded.
+        model (str, optional): The name of the Hugging Face model to use. Defaults to "all-MiniLM-L6-v2".
 
-        # Send system instructions
-        chat.send_message(SYSTEM_INSTRUCTIONS)
+    Returns:
+        numpy.ndarray: An array of embeddings for the input texts.
+    """
+    model = SentenceTransformer(f"sentence-transformers/{model}")  # or any other pretrained model
+    embeddings = model.encode(texts, show_progress_bar=True)
+    return embeddings
 
-        # RAG
-        message = request.message
-        # context = rag.get_context(message)
-        # message += " " + context
-        context = rag.get_context(message)
-        message += " " + context
+def get_langchain_embeddings(model="all-MiniLM-L6-v2"):
+    """
+    Provides embeddings compatible with the LangChain vector database.
 
-        # Send user message and get response
-        response = chat.send_message(message)
+    Args:
+        model (str, optional): The name of the Hugging Face model to use. Defaults to "all-MiniLM-L6-v2".
 
-
-        return {"response": response.text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Headstarter Tech Support Bot API. Use the /chat endpoint to chat."}
+    Returns:
+        HuggingFaceEmbeddings: An instance of HuggingFaceEmbeddings initialized with the specified model.
+    
+    References:
+        https://api.python.langchain.com/en/latest/embeddings/langchain_huggingface.embeddings.huggingface.HuggingFaceEmbeddings.html
+    """
+    model_name = f"sentence-transformers/{model}"
+    return HuggingFaceEmbeddings(model_name=model_name)
 
 if __name__ == "__main__":
-    import uvicorn
+    """
+    Main entry point for testing the embedding functions.
+
+    This block will execute when the module is run as a script. It generates embeddings for a predefined
+    list of example texts and prints the type and shape of the first embedding.
+    """
+    texts = ["This is an example sentence", "Each sentence is converted"]
+    embeddings = get_embeddings(texts)
+    print(type(embeddings[0]), embeddings[0].shape)
